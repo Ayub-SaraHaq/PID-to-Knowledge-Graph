@@ -12,53 +12,89 @@ By Scott Duncan. Reach me on [LinkedIn](https://www.linkedin.com/in/s-r-duncan/)
 
 The output is meant to be one layer of a chemical-manufacturing **context layer**. An LLM application can query it to answer questions such as "what feeds this clarifier?", "which transmitters sit downstream of P-101?" or "what does FIC-0502 manipulate?" from the drawings themselves.
 
-## Quick start
+## Quick start: run the web app
 
-### Web UI for the Claude skill (PNG/JPEG → graph, presentable)
+The web app is the easiest way in. Upload a P&ID image, watch Claude read it, then explore the detections, the knowledge graph and the JSON, and ask questions about the drawing.
 
-`webapp/` is a local website that runs **this skill, unchanged, through Claude Code**
-and presents the result. Upload a drawing image; the server wraps it as a one-page
-PDF and starts `claude -p` headless in a fresh run folder. Claude follows `SKILL.md`
-(probe, render, orient, hints, extract, build, QA loop, report) while the page shows
-a live step tracker and activity feed. When it finishes you get:
+### 1. What you need
 
-- **Detections**: the drawing with the extracted boxes drawn on it. Toggle buttons
-  switch equipment, valves, instruments, off-page connectors, boundaries, process
-  lines, signal lines and labels on and off. There is also a confidence filter, tag
-  search and zoom/pan. Click a box to see its extraction JSON.
-- **Graph**: an interactive knowledge graph with node-type and edge-type toggles.
-- **JSON**: switch between `graph.json`, each `extract/page_NN.json`, `run.json`
-  and `manifest.json`, with copy and download buttons.
-- **Summary**, **QA issues** (filtered by severity), **Claude report** and the full
-  **activity log**.
-- **Sara-AI-Chat**: ask questions about the drawing ("where is XV-30792?", "what is on
-  line 2"-H-1601-A28?", "which instruments are in loop F-30790?"). The knowledge base is
-  the run's own `graph.json` and nothing else. Answers outline the items on the drawing
-  with dotted boxes (a line is shown by the items on it, a loop by its members), and
-  **Show in graph** highlights them in the graph. To keep answers grounded:
-  - Claude runs headless with **no tools** and must return JSON listing the node ids it used.
-  - The server **verifies** the answer: cited ids not in the graph are dropped and reported.
-    Any tag or line number in the text that is not in the graph is flagged in red.
-  - Counts come from exact totals computed from the graph, not from Claude counting.
-  - **Exact search (no AI, free)** answers tag and line-number lookups deterministically.
+- **Python 3.10 or newer.** 3.12 is best: on 3.13 and later everything works, but without the OCR cross-check and automatic page orientation.
+- **[Claude Code](https://code.claude.com/docs/en/overview)** (the `claude` command) installed and logged in. Check with `claude --version`, and log in once by running `claude` and typing `/login`. The app uses your Claude Code login; it never asks for or stores an API key.
+- macOS or Linux. On Windows, use WSL, because each run folder links to the skill with a symlink.
 
-  Each answer shows its model, cost and tokens. Conversations are saved in the run's
-  `chat/history.jsonl`, and **New chat** moves the old one to `chat/archive/`.
+### 2. Get the code and install the packages
 
 ```bash
-uv pip install --python .venv/bin/python -r webapp/requirements.txt   # or: .venv/bin/pip install -r ...
-.venv/bin/python -m uvicorn webapp.server:app --host 127.0.0.1 --port 8700
+git clone <this repository URL> PID-to-Knowledge-Graph
+cd PID-to-Knowledge-Graph
+
+python3 -m venv .venv
+source .venv/bin/activate              # run this again in every new terminal
+pip install -r webapp/requirements.txt
 ```
 
-Open <http://127.0.0.1:8700>. You need the [Claude Code](https://code.claude.com/docs/en/overview) CLI on `PATH`
-and logged in; the app never asks for or stores an API key. **Load bundled sample**
-shows the UI from the test fixture without calling Claude.
+### 3. Install the skill in Claude Code (optional for the web app)
 
-**Every run gets its own folder** under `runs/`, so drawings never mix:
+The web app always uses the skill inside this repository (`skills/pid-to-kg`), so it works without this step. Copy the skill only if you also want to use it directly in Claude Code (see [Using the skill directly in Claude Code](#using-the-skill-directly-in-claude-code-pdf)):
+
+```bash
+mkdir -p ~/.claude/skills
+cp -R skills/pid-to-kg ~/.claude/skills/
+```
+
+### 4. Start the server
+
+From the repository folder, with the virtual environment active:
+
+```bash
+uvicorn webapp.server:app --host 127.0.0.1 --port 8100
+```
+
+Open <http://127.0.0.1:8100>. Leave the terminal open while you use the app, and press **Ctrl+C** to stop it.
+
+To let other computers on a **trusted** network open it, bind to all interfaces instead:
+
+```bash
+uvicorn webapp.server:app --host 0.0.0.0 --port 8100
+```
+
+They then use `http://<your computer's IP>:8100`. **The app has no login.** Anyone who can reach the port can see every uploaded drawing and start Claude runs and chats that are billed to your Claude account. Do not use `0.0.0.0` on public or shared Wi-Fi, and stop the server when you are done.
+
+### 5. Use it
+
+1. Click **Load bundled sample (no Claude call)** to check that everything works. It is instant and free.
+2. Drop a P&ID image (PNG, JPEG, WebP or TIFF, up to 30 MB) on **New run**, give it a name, pick a Claude model, and click **Generate knowledge graph**.
+3. Watch the step tracker and live activity. A sheet usually takes 5–20 minutes.
+4. When it is done, explore the tabs (see [What the web app shows](#what-the-web-app-shows)), or open any earlier run from **Run history**.
+
+### Restarting and troubleshooting
+
+- **After changing or updating the code, restart the server** (Ctrl+C, then start it again) and reload the page with Cmd+Shift+R or Ctrl+Shift+R. A running server keeps the code it started with, so new features such as Sara-AI-Chat stay unavailable until you restart.
+- **Wait until no run is in progress before restarting.** A restart marks unfinished runs as `interrupted`.
+- **Port already in use:** pick another port (`--port 8700`), or find what is using it with `lsof -i :8100`.
+- **`claude: command not found`** or runs fail at once: install Claude Code and log in (step 1), then restart the server from the same terminal.
+- **`uvicorn: command not found`:** activate the virtual environment first (`source .venv/bin/activate`), or run `.venv/bin/python -m uvicorn ...`.
+
+## What the web app shows
+
+- **Detections**: the drawing with the extracted boxes drawn on it. Toggle buttons switch equipment, valves, instruments, off-page connectors, boundaries, process lines, signal lines and labels on and off. There is also a confidence filter, tag search and zoom/pan. Click a box to see its extraction JSON.
+- **Graph**: an interactive knowledge graph with node-type and edge-type toggles.
+- **JSON**: switch between `graph.json`, each `extract/page_NN.json`, `run.json` and `manifest.json`, with copy and download buttons.
+- **Summary**, **QA issues** (filtered by severity), **Claude report** and the full **activity log**.
+- **Sara-AI-Chat**: ask questions about the drawing, such as "where is XV-30792?", "what is on line 2"-H-1601-A28?" or "list the equipment". The knowledge base is the run's own `graph.json` and nothing else. Answers outline the items on the drawing with dotted boxes (a line is shown by the items on it, a loop by its members), and **Show in graph** highlights them in the graph. To keep answers grounded:
+  - Claude runs with **no tools** and must return JSON listing the node ids it used.
+  - The server **verifies** every answer. Cited ids that are not in the graph are dropped and reported, and any tag or line number in the text that is not in the graph is flagged in red.
+  - Counts come from exact totals computed from the graph, not from Claude counting.
+  - **Exact search (no AI, free)** answers tag and line-number lookups without calling Claude.
+- **Usage**: every run and every chat answer shows its model, measured cost and tokens.
+
+## Where results are saved
+
+Every run gets its own folder under `runs/`, so drawings never mix:
 
 ```
 runs/
-  index.csv                                   one row per run (file, hash, counts, cost, folder)
+  index.csv                                   one row per run (file, hash, counts, tokens, cost, folder)
   20261111-093144_brine-receiver_be7fcf/
     run.json                                  status, timings, model, cost, headline counts
     input/<original image>  input/drawing.pdf
@@ -67,55 +103,29 @@ runs/
     chat/history.jsonl  chat/archive/         Sara-AI-Chat questions, answers, citations, cost
 ```
 
-`runs/` is git-ignored because drawings are usually confidential. Runs are processed
-one at a time, and later uploads wait in a queue. Notes:
+**Download outputs (.zip)** on a run page packs the input, extraction, graph files and chat. Set `PIDKG_RUNS_DIR` to keep runs somewhere else. `runs/` is git-ignored because drawings are usually confidential; back it up like any other engineering data.
 
-- **Sandbox.** Claude runs with `--permission-mode acceptEdits` and an allow-list:
-  Read/Write/Edit/Glob/Grep plus `Bash(python3 skill/scripts/*)`. Web tools and
-  subagents are disabled. Drawing text is treated as data, not instructions.
-- **Local only.** Bind to `127.0.0.1`. There is no login, so do not expose the app on a network.
-- **Cost and time.** Each run uses your Claude Code plan or API credits and usually
-  takes 5–20 minutes per sheet. Each run page shows the measured cost, cost per sheet
-  and token breakdown (input, cache write/read, output, thinking, per model) from Claude
-  Code's own end-of-run report; the same figures go to `run.json` and `runs/index.csv`.
-  Pick the model per run: Opus 5.5, Fable 5.2, Sonnet 5.5, Haiku 5.5 or the Claude Code default.
-- **OCR.** Without OCR on Python 3.13+, hints and auto-rotation are skipped (see below).
-- **Review.** The output is machine-extracted; review the QA tab before engineering use.
+## Security, cost and quality notes
 
-### Claude Code workflow (PDF)
+- **Sandbox.** Extraction runs use `claude -p --permission-mode acceptEdits` with an allow-list: Read/Write/Edit/Glob/Grep plus `Bash(python3 skill/scripts/*)`. Web tools and subagents are disabled. Chat answers run with no tools at all. Drawing text is treated as data, never as instructions.
+- **No login.** Keep the server on `127.0.0.1` unless you need network access (see step 4).
+- **One run at a time.** Later uploads wait in a queue.
+- **Cost.** Runs and chats use your Claude Code plan or API credits. Costs are Claude Code's own measured figures at API list prices; on a subscription plan they count against your plan rather than being billed. A sheet on Opus 5.5 has cost about $3.50. A chat costs about $0.30 for the first question on a drawing (Sonnet 5.5) and about $0.02 for each one after that. Pick the model per run: Opus 5.5, Fable 5.2, Sonnet 5.5, Haiku 5.5 or the Claude Code default.
+- **Review.** The output is machine-extracted. Check the QA tab before any engineering use (see [Disclaimer](#disclaimer)).
 
-No programming is needed. You need [Claude Code](https://code.claude.com/docs/en/overview) (the desktop app or the terminal version) and [Python](https://www.python.org/downloads/) 3.10 or newer. Python 3.12 is the best choice: on 3.13 and later the skill still works, but without the text-recognition (OCR) cross-check and automatic page orientation.
+## Using the skill directly in Claude Code (PDF)
 
-**1. Download the skill.** On this page, click the green **Code** button, then **Download ZIP**. Unzip the file.
+Without the web app, you can use the skill on multi-page PDF sets straight from Claude Code. No programming is needed.
 
-**2. Install it.** In the unzipped folder, open `skills` and copy the `pid-to-kg` folder into your personal Claude skills folder:
+1. **Install the skill.** Copy `skills/pid-to-kg` into your personal skills folder: `~/.claude/skills/` on macOS and Linux, `C:\Users\<your user name>\.claude\skills\` on Windows. The `.claude` folder is hidden: in Finder press **Cmd + Shift + .**, and in Windows File Explorer use **View → Show → Hidden items**.
+2. **Add your P&IDs.** Put the PDF in a new project folder and open that folder in Claude Code. No P&IDs at hand? The [public chemical manufacturing datasets](https://github.com/ScottDuncanAI/public-chemical-manufacturing-datasets#pids) repo lists public P&ID sets from real facilities.
+3. **Ask Claude to convert them**, for example:
+   > Convert `haile.pdf` into a knowledge graph. The P&IDs are on pages 47–60.
 
-| System | Skills folder |
-|---|---|
-| Windows | `C:\Users\<your user name>\.claude\skills\` |
-| macOS | `/Users/<your user name>/.claude/skills/` |
+   The skill loads by itself. The first time, Claude installs the Python packages it needs and asks before running commands. It may ask a question along the way, such as which revision to use when a PDF holds two versions of a drawing.
+4. **Check the graph by asking questions** you can verify on the drawings, such as "What sensor measures the flow into TK-101, and where exactly is it?"
 
-If the `skills` folder doesn't exist yet, create it. The `.claude` folder is hidden by default: in Windows File Explorer use **View → Show → Hidden items**, and in macOS Finder press **Cmd + Shift + .** to show it.
-
-**3. Add your P&IDs.** Make a new folder for the project and put your P&ID PDF in it. Open that folder in Claude Code: in the desktop app, start a new Code session and choose the folder.
-
-No P&IDs at hand? My [public chemical manufacturing datasets](https://github.com/ScottDuncanAI/public-chemical-manufacturing-datasets#pids) repo lists public P&ID sets from real permitted facilities, with the page numbers where the drawings are. Both digital and scanned sets are included.
-
-**4. Ask Claude to convert them.** For example:
-
-> Convert `haile.pdf` into a knowledge graph. The P&IDs are on pages 47–60.
-
-The skill loads by itself; there is no need to name it. The first time, Claude installs the Python packages it needs, and it asks your permission before running commands. It then reads every sheet in detail, so a large drawing set takes a while. Claude may ask a question along the way, such as which revision to use when a PDF holds two versions of the same drawing. When it is done, it reports what it found and what remains uncertain.
-
-**5. Check the graph by asking questions.** The best test is to ask about things you can verify on the drawings:
-
-> Name all the equipment upstream of the clarifier.
->
-> What sensor measures the flow into TK-101, and where exactly is it?
->
-> What does FIC-0502 control, and what valve does it move?
-
-The results are saved in `work/<plant name>/kg/` inside your project folder. `summary.md` is a readable overview of the whole plant, and `qa_report.md` lists anything Claude could not confirm.
+The results are saved in `work/<plant name>/kg/` inside your project folder. `summary.md` is a readable overview of the plant, and `qa_report.md` lists anything Claude could not confirm.
 
 ## How it works
 
@@ -178,13 +188,20 @@ The node and edge types are described in [`references/ontology.md`](skills/pid-t
 ## Repository layout
 
 ```
+webapp/
+  server.py                   FastAPI app: uploads, run queue, results, files, chat API
+  pipeline.py                 run folders, Claude Code runner, progress and cost tracking
+  kb.py                       Sara-AI-Chat: knowledge base, search, grounded answers, verification
+  static/                     the web page (index.html, app.js, style.css)
+  requirements.txt            web app packages (includes the skill's requirements)
 skills/pid-to-kg/
   SKILL.md                    workflow Claude follows
   references/                 extraction procedure, ISA-5.1 guide, symbol guide, ontology, JSON schemas
   scripts/                    probe, render, hints, build, query, export, eval, crop
   scripts/pidkg/              library: models, ISA parsing, builder, loops, QA, storage, summary
 docs/                         README diagram
-tests/                        pytest suite with a synthetic two-sheet plant and synthetic PDFs
+tests/                        pytest suite: synthetic two-sheet plant, synthetic PDFs, web app
+runs/                         created at run time; one folder per web app run (git-ignored)
 ```
 
 ## Limitations
@@ -197,8 +214,9 @@ tests/                        pytest suite with a synthetic two-sheet plant and 
 ## Development
 
 ```bash
-pip install -e ".[dev]"
-pytest
+source .venv/bin/activate
+pip install -e ".[dev]" -r webapp/requirements.txt httpx
+pytest                                                        # no Claude calls; fake binaries stand in
 python skills/pid-to-kg/scripts/build_kg.py --write-schemas   # after changing pidkg/models.py
 ```
 
