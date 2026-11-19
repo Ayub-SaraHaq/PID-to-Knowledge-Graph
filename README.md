@@ -14,6 +14,76 @@ The output is meant to be one layer of a chemical-manufacturing **context layer*
 
 ## Quick start
 
+### Web UI for the Claude skill (PNG/JPEG → graph, presentable)
+
+`webapp/` is a local website that runs **this skill, unchanged, through Claude Code**
+and presents the result. Upload a drawing image; the server wraps it as a one-page
+PDF and starts `claude -p` headless in a fresh run folder. Claude follows `SKILL.md`
+(probe, render, orient, hints, extract, build, QA loop, report) while the page shows
+a live step tracker and activity feed. When it finishes you get:
+
+- **Detections**: the drawing with the extracted boxes drawn on it. Toggle buttons
+  switch equipment, valves, instruments, off-page connectors, boundaries, process
+  lines, signal lines and labels on and off. There is also a confidence filter, tag
+  search and zoom/pan. Click a box to see its extraction JSON.
+- **Graph**: an interactive knowledge graph with node-type and edge-type toggles.
+- **JSON**: switch between `graph.json`, each `extract/page_NN.json`, `run.json`
+  and `manifest.json`, with copy and download buttons.
+- **Summary**, **QA issues** (filtered by severity), **Claude report** and the full
+  **activity log**.
+- **Sara-AI-Chat**: ask questions about the drawing ("where is XV-30792?", "what is on
+  line 2"-H-1601-A28?", "which instruments are in loop F-30790?"). The knowledge base is
+  the run's own `graph.json` and nothing else. Answers outline the items on the drawing
+  with dotted boxes (a line is shown by the items on it, a loop by its members), and
+  **Show in graph** highlights them in the graph. To keep answers grounded:
+  - Claude runs headless with **no tools** and must return JSON listing the node ids it used.
+  - The server **verifies** the answer: cited ids not in the graph are dropped and reported.
+    Any tag or line number in the text that is not in the graph is flagged in red.
+  - Counts come from exact totals computed from the graph, not from Claude counting.
+  - **Exact search (no AI, free)** answers tag and line-number lookups deterministically.
+
+  Each answer shows its model, cost and tokens. Conversations are saved in the run's
+  `chat/history.jsonl`, and **New chat** moves the old one to `chat/archive/`.
+
+```bash
+uv pip install --python .venv/bin/python -r webapp/requirements.txt   # or: .venv/bin/pip install -r ...
+.venv/bin/python -m uvicorn webapp.server:app --host 127.0.0.1 --port 8700
+```
+
+Open <http://127.0.0.1:8700>. You need the [Claude Code](https://code.claude.com/docs/en/overview) CLI on `PATH`
+and logged in; the app never asks for or stores an API key. **Load bundled sample**
+shows the UI from the test fixture without calling Claude.
+
+**Every run gets its own folder** under `runs/`, so drawings never mix:
+
+```
+runs/
+  index.csv                                   one row per run (file, hash, counts, cost, folder)
+  20261111-093144_brine-receiver_be7fcf/
+    run.json                                  status, timings, model, cost, headline counts
+    input/<original image>  input/drawing.pdf
+    work/                                     the skill's work dir: manifest, pages/, hints/, extract/, kg/
+    logs/activity.jsonl  logs/claude_stream.jsonl  logs/claude_stderr.log
+    chat/history.jsonl  chat/archive/         Sara-AI-Chat questions, answers, citations, cost
+```
+
+`runs/` is git-ignored because drawings are usually confidential. Runs are processed
+one at a time, and later uploads wait in a queue. Notes:
+
+- **Sandbox.** Claude runs with `--permission-mode acceptEdits` and an allow-list:
+  Read/Write/Edit/Glob/Grep plus `Bash(python3 skill/scripts/*)`. Web tools and
+  subagents are disabled. Drawing text is treated as data, not instructions.
+- **Local only.** Bind to `127.0.0.1`. There is no login, so do not expose the app on a network.
+- **Cost and time.** Each run uses your Claude Code plan or API credits and usually
+  takes 5–20 minutes per sheet. Each run page shows the measured cost, cost per sheet
+  and token breakdown (input, cache write/read, output, thinking, per model) from Claude
+  Code's own end-of-run report; the same figures go to `run.json` and `runs/index.csv`.
+  Pick the model per run: Opus 5.5, Fable 5.2, Sonnet 5.5, Haiku 5.5 or the Claude Code default.
+- **OCR.** Without OCR on Python 3.13+, hints and auto-rotation are skipped (see below).
+- **Review.** The output is machine-extracted; review the QA tab before engineering use.
+
+### Claude Code workflow (PDF)
+
 No programming is needed. You need [Claude Code](https://code.claude.com/docs/en/overview) (the desktop app or the terminal version) and [Python](https://www.python.org/downloads/) 3.10 or newer. Python 3.12 is the best choice: on 3.13 and later the skill still works, but without the text-recognition (OCR) cross-check and automatic page orientation.
 
 **1. Download the skill.** On this page, click the green **Code** button, then **Download ZIP**. Unzip the file.

@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P&amp;ID Knowledge Graph</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='8' cy='16' r='5' fill='%232563eb'/%3E%3Ccircle cx='24' cy='8' r='4' fill='%23059669'/%3E%3Ccircle cx='24' cy='24' r='4' fill='%23d97706'/%3E%3Cpath d='M12 14l8-5M12 18l8 5' stroke='%2364748b' stroke-width='2'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.2/cytoscape.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><circle cx="8" cy="16" r="5" fill="var(--c-equipment)"/><circle cx="24" cy="8" r="4" fill="var(--c-instrument)"/><circle cx="24" cy="24" r="4" fill="var(--c-component)"/><path d="M12 14l8-5M12 18l8 5" stroke="var(--muted)" stroke-width="2"/></svg>
+    <div>
+      <h1>P&amp;ID → Knowledge Graph</h1>
+      <p>Upload a drawing · the <code>pid-to-kg</code> skill reads it · explore detections, graph and JSON</p>
+    </div>
+  </div>
+  <button id="themeBtn" class="ghost" title="Toggle light / dark">◐</button>
+</header>
+
+<div class="layout">
+  <aside class="sidebar">
+    <section class="card newrun" id="newRunCard">
+      <div class="row between">
+        <h2>New run</h2>
+        <button id="collapseNew" class="ghost small" type="button" aria-expanded="true" aria-controls="newRunBody" title="Collapse or expand">▾ Hide</button>
+      </div>
+      <div id="newRunBody">
+      <form id="uploadForm">
+        <label id="drop" class="drop" tabindex="0">
+          <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp,image/tiff" hidden>
+          <img id="dropPreview" alt="" hidden>
+          <span id="dropText"><strong>Drop a P&amp;ID image</strong><br>or click to choose · PNG, JPEG, WebP, TIFF</span>
+        </label>
+        <label class="field">Plant / drawing name
+          <input id="plantInput" type="text" maxlength="80" placeholder="e.g. Brine receiver area">
+        </label>
+        <label class="field">Claude model
+          <select id="modelSelect"></select>
+          <span id="modelNote" class="hint"></span>
+        </label>
+        <button id="runBtn" type="submit" class="primary" disabled>Generate knowledge graph</button>
+        <p class="hint">Runs Claude Code headless with the skill. A sheet usually takes 5–20 minutes and uses your Claude Code plan or API credits.</p>
+      </form>
+      <button id="sampleBtn" class="ghost small">Load bundled sample (no Claude call)</button>
+      </div>
+    </section>
+
+    <div id="sideSplit" class="splitter" role="separator" aria-orientation="horizontal" aria-label="Resize New run and Run history" tabindex="0" title="Drag to resize · double-click to reset"></div>
+
+    <section class="card history">
+      <div class="row between">
+        <h2>Run history</h2>
+        <a id="csvLink" href="/api/runs.csv" class="small">index.csv</a>
+      </div>
+      <div id="runTotals" class="totals"></div>
+      <p class="hint mono" id="runsDir"></p>
+      <ul id="runList" class="runlist"></ul>
+    </section>
+  </aside>
+
+  <main id="main">
+    <section id="emptyState" class="empty">
+      <h2>No run selected</h2>
+      <p>Upload a P&amp;ID image on the left, or pick a previous run from the history. Every run is stored in its own folder with the input image, the skill's work files, the extraction and the knowledge graph.</p>
+    </section>
+
+    <section id="runView" hidden>
+      <div class="runhead">
+        <div>
+          <div class="row gap"><h2 id="rvTitle"></h2><span id="rvStatus" class="status"></span></div>
+          <p class="hint" id="rvMeta"></p>
+          <p class="hint mono" id="rvFolder"></p>
+        </div>
+        <div class="row gap">
+          <button id="cancelBtn" class="danger" hidden>Cancel run</button>
+          <a id="zipBtn" class="button" hidden>Download outputs (.zip)</a>
+        </div>
+      </div>
+
+      <div id="progressView" hidden>
+        <ol id="stepper" class="stepper"></ol>
+        <div class="card feedcard">
+          <div class="row between"><h3>Live activity</h3><span class="hint mono"><span id="liveTokens"></span> <span id="elapsed"></span></span></div>
+          <ul id="feed" class="feed"></ul>
+        </div>
+      </div>
+
+      <div id="errorBox" class="errorbox" hidden></div>
+
+      <div id="resultView" hidden>
+        <div id="stats" class="stats"></div>
+        <section id="usage" class="card usage">
+          <div class="row between"><h3>Claude usage for this request</h3><span id="usageBasis" class="hint"></span></div>
+          <div id="usageCards" class="ustats"></div>
+          <table id="usageModels" class="table"></table>
+        </section>
+        <nav class="tabs" role="tablist">
+          <button class="tab active" data-tab="detections">Detections</button>
+          <button class="tab" data-tab="graph">Graph</button>
+          <button class="tab" data-tab="json">JSON</button>
+          <button class="tab" data-tab="summary">Summary</button>
+          <button class="tab" data-tab="chat">Sara-AI-Chat</button>
+          <button class="tab" data-tab="qa">QA issues</button>
+          <button class="tab" data-tab="report">Claude report</button>
+          <button class="tab" data-tab="activity">Activity log</button>
+        </nav>
+
+        <div class="tabpanel" id="tab-detections">
+          <div class="toolbar">
+            <div id="detToggles" class="toggles"></div>
+            <div class="row gap wrap">
+              <select id="pageSelect" hidden></select>
+              <label class="mini">Min confidence <input id="confRange" type="range" min="0" max="1" step="0.05" value="0"><span id="confVal">0.00</span></label>
+              <input id="detSearch" type="search" placeholder="Find tag…">
+              <button id="fitBtn" class="ghost small">Fit</button>
+            </div>
+          </div>
+          <div class="split">
+            <div id="viewer" class="viewer"><svg id="overlay"></svg><div id="noImage" class="noimage" hidden>No drawing image for this run. Boxes are drawn on a blank sheet.</div></div>
+            <aside class="details" id="detDetails"><p class="hint">Click a box to see what the skill recorded for it.</p></aside>
+          </div>
+        </div>
+
+        <div class="tabpanel" id="tab-graph" hidden>
+          <div class="toolbar">
+            <div><div class="tlabel">Nodes</div><div id="nodeToggles" class="toggles"></div></div>
+            <div><div class="tlabel">Edges</div><div id="edgeToggles" class="toggles"></div></div>
+            <div class="row gap">
+              <select id="layoutSelect">
+                <option value="cose">Force layout</option>
+                <option value="breadthfirst">Hierarchy</option>
+                <option value="concentric">Concentric</option>
+              </select>
+              <label class="mini"><input id="edgeLabels" type="checkbox"> edge labels</label>
+              <button id="graphFit" class="ghost small">Fit</button>
+            </div>
+          </div>
+          <div class="split">
+            <div id="cy" class="viewer"></div>
+            <aside class="details" id="graphDetails"><p class="hint">Click a node or edge.</p></aside>
+          </div>
+        </div>
+
+        <div class="tabpanel" id="tab-json" hidden>
+          <div class="toolbar">
+            <div id="jsonToggles" class="segmented"></div>
+            <div class="row gap">
+              <button id="copyJson" class="ghost small">Copy</button>
+              <a id="dlJson" class="button small">Download</a>
+            </div>
+          </div>
+          <pre id="jsonView" class="json"></pre>
+        </div>
+
+        <div class="tabpanel md" id="tab-summary" hidden></div>
+
+        <div class="tabpanel" id="tab-chat" hidden>
+          <div class="chatwrap">
+            <section class="chatcol">
+              <div class="toolbar chathead">
+                <div class="row gap wrap">
+                  <select id="chatModel" title="Claude model used for AI answers"></select>
+                  <div id="chatMode" class="segmented" role="group" aria-label="Answer mode">
+                    <button type="button" data-mode="ai" class="on">AI answer</button>
+                    <button type="button" data-mode="search">Exact search (no AI, free)</button>
+                  </div>
+                </div>
+                <div class="row gap"><span id="chatCost" class="hint mono"></span><button id="chatClear" type="button" class="ghost small" title="Start a new conversation (the old one is archived in the run folder)">New chat</button></div>
+              </div>
+              <p class="hint" id="chatKb"></p>
+              <div id="chatLog" class="chatlog" aria-live="polite"></div>
+              <details id="chatSuggestBox" class="suggestbox" open><summary>Example questions for this drawing</summary><div id="chatSuggest" class="suggest"></div></details>
+              <form id="chatForm" class="chatform">
+                <textarea id="chatInput" rows="2" maxlength="1000" placeholder="Ask about this P&amp;ID, e.g. “Where is the hydrogen trip valve?” (Enter to send, Shift+Enter for a new line)"></textarea>
+                <button id="chatSend" class="primary" type="submit">Ask</button>
+              </form>
+            </section>
+            <section class="chatview">
+              <div class="toolbar">
+                <span id="chatViewTitle" class="hint">Items in Sara's answer are outlined on the drawing with dotted boxes.</span>
+                <div class="row gap wrap">
+                  <select id="chatPage" hidden></select>
+                  <label class="mini"><input id="chatShowAll" type="checkbox"> all detections</label>
+                  <button id="chatGraphBtn" type="button" class="ghost small" disabled>Show in graph</button>
+                  <button id="chatFit" type="button" class="ghost small">Fit</button>
+                </div>
+              </div>
+              <div id="chatViewer" class="viewer"><svg id="chatSvg"></svg></div>
+              <div id="chatItems" class="chatitems"></div>
+            </section>
+          </div>
+        </div>
+        <div class="tabpanel" id="tab-qa" hidden>
+          <div class="toolbar"><div id="qaToggles" class="toggles"></div></div>
+          <table class="table" id="qaTable"></table>
+          <details class="md-details"><summary>Full qa_report.md</summary><div id="qaMd" class="md"></div></details>
+        </div>
+        <div class="tabpanel md" id="tab-report" hidden></div>
+        <div class="tabpanel" id="tab-activity" hidden><ul id="feedAll" class="feed tall"></ul></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

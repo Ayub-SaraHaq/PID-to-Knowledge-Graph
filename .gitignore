@@ -22,3 +22,10 @@ dist/
 Thumbs.db
 .vscode/
 .idea/
+
+# Local API credentials
+.env
+.env.*
+
+# Web UI run folders (uploaded drawings and their outputs; may be confidential)
+runs/

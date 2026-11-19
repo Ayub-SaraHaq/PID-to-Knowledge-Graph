@@ -1,0 +1,5 @@
+# Local web UI for the pid-to-kg skill (python -m uvicorn webapp.server:app)
+-r ../skills/pid-to-kg/scripts/requirements.txt
+fastapi>=0.110,<1
+uvicorn>=0.29
+python-multipart>=0.0.9
