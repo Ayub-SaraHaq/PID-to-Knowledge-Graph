@@ -19,10 +19,44 @@ The web app is the easiest way in. Upload a P&ID image, watch Claude read it, th
 ### 1. What you need
 
 - **Python 3.10 or newer.** 3.12 is best: on 3.13 and later everything works, but without the OCR cross-check and automatic page orientation.
-- **[Claude Code](https://code.claude.com/docs/en/overview)** (the `claude` command) installed and logged in. Check with `claude --version`, and log in once by running `claude` and typing `/login`. The app uses your Claude Code login; it never asks for or stores an API key.
+- **[Claude Code](https://code.claude.com/docs/en/overview)** (the `claude` command) installed. Check with `claude --version`.
+- **A Claude account** that Claude Code is logged in to (next step).
 - macOS or Linux. On Windows, use WSL, because each run folder links to the skill with a symlink.
 
-### 2. Get the code and install the packages
+### 2. Log in to your Claude account
+
+The web app has no login screen of its own and never asks for an API key. Each run, and each Sara-AI-Chat answer, starts the `claude` command in the background **as the same user who started the server**. That command uses whatever account Claude Code is logged in to on this computer. Usage is counted against that account.
+
+**Log in once, in a normal terminal, as the user who will run the server:**
+
+```bash
+claude auth login              # Claude subscription (Pro, Max, Team or Enterprise); opens the browser
+claude auth login --sso        # if your organisation signs in with SSO
+claude auth login --console    # Anthropic Console account instead (pay-as-you-go API billing)
+```
+
+You can also run `claude` and type `/login`. On macOS the sign-in is kept in the Keychain; on Linux it is kept under `~/.claude/`. You never copy it into this repository.
+
+**Check that it works before starting the server:**
+
+```bash
+claude auth status --text      # login method, organisation, account, when the sign-in ends
+claude -p "Reply with OK"      # a one-line test call; should print OK
+```
+
+**Which account pays.** With a subscription login, runs and chats count against your plan; with a Team or Enterprise account, they count against your organisation's plan, and your admin's model and usage limits apply. With a Console login they are billed to that Console organisation. The costs the app shows are Claude Code's own figures at API list prices.
+
+**Watch for `ANTHROPIC_API_KEY`.** If this variable is set in the terminal where you start the server, Claude Code can use that key instead of your login, and billing then goes to the key's owner. Check with `echo $ANTHROPIC_API_KEY`, and run `unset ANTHROPIC_API_KEY` before starting the server unless you mean to use the key.
+
+**When the sign-in ends** (`claude auth status --text` shows the date), new runs and chat answers fail with a login error. Run `claude auth login` again in a terminal and retry; you do not need to restart the server. A run that was already going when the sign-in ended has to be started again.
+
+**Servers without a browser** (a remote machine or a service):
+- Run `claude setup-token` on a computer where you can sign in. This needs a Claude subscription and creates a long-lived token.
+- Give the token to the server process as the environment variable `CLAUDE_CODE_OAUTH_TOKEN`, using your secret manager or service configuration.
+- Never put the token in this repository, in a README or in shell history, and revoke it when the server is retired.
+- Anyone who can use the app then uses that account, so keep such a server off untrusted networks (see step 5).
+
+### 3. Get the code and install the packages
 
 ```bash
 git clone <this repository URL> PID-to-Knowledge-Graph
@@ -33,7 +67,7 @@ source .venv/bin/activate              # run this again in every new terminal
 pip install -r webapp/requirements.txt
 ```
 
-### 3. Install the skill in Claude Code (optional for the web app)
+### 4. Install the skill in Claude Code (optional for the web app)
 
 The web app always uses the skill inside this repository (`skills/pid-to-kg`), so it works without this step. Copy the skill only if you also want to use it directly in Claude Code (see [Using the skill directly in Claude Code](#using-the-skill-directly-in-claude-code-pdf)):
 
@@ -42,7 +76,7 @@ mkdir -p ~/.claude/skills
 cp -R skills/pid-to-kg ~/.claude/skills/
 ```
 
-### 4. Start the server
+### 5. Start the server
 
 From the repository folder, with the virtual environment active:
 
@@ -60,7 +94,9 @@ uvicorn webapp.server:app --host 0.0.0.0 --port 8100
 
 They then use `http://<your computer's IP>:8100`. **The app has no login.** Anyone who can reach the port can see every uploaded drawing and start Claude runs and chats that are billed to your Claude account. Do not use `0.0.0.0` on public or shared Wi-Fi, and stop the server when you are done.
 
-### 5. Use it
+Start the server from a terminal where step 2's checks pass. The server passes that terminal's environment (`PATH`, any `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`) on to Claude Code.
+
+### 6. Use it
 
 1. Click **Load bundled sample (no Claude call)** to check that everything works. It is instant and free.
 2. Drop a P&ID image (PNG, JPEG, WebP or TIFF, up to 30 MB) on **New run**, give it a name, pick a Claude model, and click **Generate knowledge graph**.
@@ -72,7 +108,9 @@ They then use `http://<your computer's IP>:8100`. **The app has no login.** Anyo
 - **After changing or updating the code, restart the server** (Ctrl+C, then start it again) and reload the page with Cmd+Shift+R or Ctrl+Shift+R. A running server keeps the code it started with, so new features such as Sara-AI-Chat stay unavailable until you restart.
 - **Wait until no run is in progress before restarting.** A restart marks unfinished runs as `interrupted`.
 - **Port already in use:** pick another port (`--port 8700`), or find what is using it with `lsof -i :8100`.
-- **`claude: command not found`** or runs fail at once: install Claude Code and log in (step 1), then restart the server from the same terminal.
+- **`claude: command not found`:** install Claude Code (step 1), then start the server again from a terminal where `claude --version` works.
+- **Runs or chat answers fail with a login, "not logged in" or authentication error:** run `claude auth status --text`, sign in again with `claude auth login`, and retry (step 2). Also check that `ANTHROPIC_API_KEY` is not set to an old key. A run's own error log is in `runs/<run>/logs/claude_stderr.log`.
+- **Runs stop with a usage or rate limit message:** your plan's limit was reached. Wait for it to reset, choose a smaller model, or ask your admin.
 - **`uvicorn: command not found`:** activate the virtual environment first (`source .venv/bin/activate`), or run `.venv/bin/python -m uvicorn ...`.
 
 ## What the web app shows
@@ -108,7 +146,7 @@ runs/
 ## Security, cost and quality notes
 
 - **Sandbox.** Extraction runs use `claude -p --permission-mode acceptEdits` with an allow-list: Read/Write/Edit/Glob/Grep plus `Bash(python3 skill/scripts/*)`. Web tools and subagents are disabled. Chat answers run with no tools at all. Drawing text is treated as data, never as instructions.
-- **No login.** Keep the server on `127.0.0.1` unless you need network access (see step 4).
+- **No login.** Keep the server on `127.0.0.1` unless you need network access (see step 5). Everyone who can open the app uses the Claude account the server is logged in to.
 - **One run at a time.** Later uploads wait in a queue.
 - **Cost.** Runs and chats use your Claude Code plan or API credits. Costs are Claude Code's own measured figures at API list prices; on a subscription plan they count against your plan rather than being billed. A sheet on Opus 5.5 has cost about $3.50. A chat costs about $0.30 for the first question on a drawing (Sonnet 5.5) and about $0.02 for each one after that. Pick the model per run: Opus 5.5, Fable 5.2, Sonnet 5.5, Haiku 5.5 or the Claude Code default.
 - **Review.** The output is machine-extracted. Check the QA tab before any engineering use (see [Disclaimer](#disclaimer)).
